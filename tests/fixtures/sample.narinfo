@@ -1,0 +1,9 @@
+StorePath: /nix/store/abc123-hello-2.12.1
+URL: nar/0xyz.nar.zst
+Compression: zstd
+FileHash: sha256:1abcdefghijklmnopqrstuvwxyz23456789abcdefghijklmnop
+FileSize: 12345
+NarHash: sha256:1zyxwvutsrqponmlkjihgfedcba98765432123456789abcdefg
+NarSize: 67890
+References: def456-glibc-2.40 ghi789-libc++-19
+Deriver: jkl012-hello-2.12.1.drv

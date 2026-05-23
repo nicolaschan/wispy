@@ -10,8 +10,8 @@
   },
   "scripts": {
     "build": "npm run build:main && npm run build:post",
-    "build:main": "ncc build src/main.ts -o dist/main --source-map --license licenses.txt",
-    "build:post": "ncc build src/post.ts -o dist/post --source-map --license licenses.txt",
+    "build:main": "ncc build src/main.ts -o dist/main --source-map --license licenses.txt --transpile-only",
+    "build:post": "ncc build src/post.ts -o dist/post --source-map --license licenses.txt --transpile-only",
     "worker:dev": "wrangler dev --config worker/wrangler.toml",
     "worker:deploy": "wrangler deploy --config worker/wrangler.toml",
     "lint": "eslint src tests worker/src scripts",

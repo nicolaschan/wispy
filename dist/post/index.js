@@ -27431,6 +27431,70 @@ var core = __nccwpck_require__(7484);
 var exec = __nccwpck_require__(5236);
 ;// CONCATENATED MODULE: external "node:fs"
 const external_node_fs_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
+;// CONCATENATED MODULE: ./src/contract.ts
+
+function writeStatus(path, s) {
+    writeFileSync(path, JSON.stringify(s, null, 2));
+}
+function readStatus(path) {
+    const raw = JSON.parse((0,external_node_fs_namespaceObject.readFileSync)(path, 'utf8'));
+    if (!raw || typeof raw !== 'object') {
+        throw new Error(`status.json malformed: not an object`);
+    }
+    const o = raw;
+    if (typeof o.pathsPushed !== 'number' ||
+        typeof o.bytesPushed !== 'number' ||
+        typeof o.pathsFailed !== 'number' ||
+        typeof o.wallTimeMs !== 'number') {
+        throw new Error(`status.json malformed: missing required numeric fields`);
+    }
+    return {
+        pathsPushed: o.pathsPushed,
+        bytesPushed: o.bytesPushed,
+        pathsFailed: o.pathsFailed,
+        wallTimeMs: o.wallTimeMs,
+    };
+}
+const ENV_KEYS = {
+    queueFile: 'WISPY_QUEUE_FILE',
+    statusFile: 'WISPY_STATUS_FILE',
+    destUrl: 'WISPY_DEST_URL',
+    concurrency: 'WISPY_UPLOAD_CONCURRENCY',
+    awsAccessKeyId: 'AWS_ACCESS_KEY_ID',
+    awsSecretAccessKey: 'AWS_SECRET_ACCESS_KEY',
+};
+function serializeUploaderEnv(env) {
+    return {
+        [ENV_KEYS.queueFile]: env.queueFile,
+        [ENV_KEYS.statusFile]: env.statusFile,
+        [ENV_KEYS.destUrl]: env.destUrl,
+        [ENV_KEYS.concurrency]: String(env.concurrency),
+        [ENV_KEYS.awsAccessKeyId]: env.awsAccessKeyId,
+        [ENV_KEYS.awsSecretAccessKey]: env.awsSecretAccessKey,
+    };
+}
+function parseUploaderEnv(source) {
+    function need(key) {
+        const v = source[key];
+        if (!v)
+            throw new Error(`Uploader missing env var: ${key}`);
+        return v;
+    }
+    const concurrencyRaw = need(ENV_KEYS.concurrency);
+    const concurrency = Number.parseInt(concurrencyRaw, 10);
+    if (!Number.isFinite(concurrency) || concurrency < 1) {
+        throw new Error(`Uploader ${ENV_KEYS.concurrency} must be a positive integer (got "${concurrencyRaw}")`);
+    }
+    return {
+        queueFile: need(ENV_KEYS.queueFile),
+        statusFile: need(ENV_KEYS.statusFile),
+        destUrl: need(ENV_KEYS.destUrl),
+        concurrency,
+        awsAccessKeyId: need(ENV_KEYS.awsAccessKeyId),
+        awsSecretAccessKey: need(ENV_KEYS.awsSecretAccessKey),
+    };
+}
+
 ;// CONCATENATED MODULE: ./src/nixconf.ts
 const BEGIN = '# >>> wispy >>>';
 const END = '# <<< wispy <<<';
@@ -27447,6 +27511,8 @@ function removeWispyBlock(existing) {
 ;// CONCATENATED MODULE: external "node:path"
 const external_node_path_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:path");
 ;// CONCATENATED MODULE: ./src/paths.ts
+
+
 
 const NIX_CONF_PATH = '/etc/nix/nix.conf';
 const DAEMON_DROPIN_PATH = '/etc/systemd/system/nix-daemon.service.d/wispy.conf';
@@ -27468,6 +27534,22 @@ function makeRuntimePaths() {
         log: external_node_path_namespaceObject.join(dir, 'uploader.log'),
         daemonEnv: external_node_path_namespaceObject.join(dir, 'daemon-env'),
     };
+}
+/**
+ * Write content to a system path that requires root (uses `sudo cp`).
+ * Stages via a unique temp file in our runtime dir to avoid /tmp collisions
+ * with parallel jobs and to keep the cleanup in one place.
+ */
+async function writeSystemFileViaSudo(content, destPath, stagingDir) {
+    const stage = external_node_path_namespaceObject.join(stagingDir, `staged-${external_node_path_namespaceObject.basename(destPath)}-${process.pid}`);
+    external_node_fs_namespaceObject.writeFileSync(stage, content);
+    try {
+        await (0,exec.exec)('sudo', ['cp', stage, destPath]);
+    }
+    finally {
+        if (external_node_fs_namespaceObject.existsSync(stage))
+            external_node_fs_namespaceObject.unlinkSync(stage);
+    }
 }
 
 ;// CONCATENATED MODULE: ./src/queue.ts
@@ -27511,6 +27593,7 @@ class QueueParser {
 
 
 
+
 const SHUTDOWN_GRACE_MS = 60_000;
 const POLL_INTERVAL_MS = 250;
 function pidIsAlive(pid) {
@@ -27531,16 +27614,14 @@ async function waitForExit(pid, timeoutMs) {
     }
     return false;
 }
-async function cleanupNixConf() {
+async function cleanupNixConf(stagingDir) {
     if (!external_node_fs_namespaceObject.existsSync(NIX_CONF_PATH))
         return;
     const existing = external_node_fs_namespaceObject.readFileSync(NIX_CONF_PATH, 'utf8');
     const cleaned = removeWispyBlock(existing);
     if (cleaned === existing)
         return;
-    external_node_fs_namespaceObject.writeFileSync('/tmp/wispy-nix.conf.cleaned', cleaned);
-    await (0,exec.exec)('sudo', ['cp', '/tmp/wispy-nix.conf.cleaned', NIX_CONF_PATH]);
-    external_node_fs_namespaceObject.unlinkSync('/tmp/wispy-nix.conf.cleaned');
+    await writeSystemFileViaSudo(cleaned, NIX_CONF_PATH, stagingDir);
 }
 async function cleanupDaemonDropin() {
     // Remove the systemd drop-in that injected AWS creds into nix-daemon's
@@ -27600,7 +27681,7 @@ async function run() {
         }
     }
     if (external_node_fs_namespaceObject.existsSync(paths.status)) {
-        const parsed = JSON.parse(external_node_fs_namespaceObject.readFileSync(paths.status, 'utf8'));
+        const parsed = readStatus(paths.status);
         core.setOutput('paths-pushed', parsed.pathsPushed);
         core.setOutput('bytes-pushed', parsed.bytesPushed);
         core.setOutput('paths-failed', parsed.pathsFailed);
@@ -27611,14 +27692,20 @@ async function run() {
         }
     }
     else if (pid !== null) {
-        core.warning('wispy: uploader did not write status.json (likely crashed)');
+        // Uploader started but never wrote status.json — likely crashed.
+        // Count un-pushed paths from the queue to give downstream steps a real signal.
+        const queueLines = external_node_fs_namespaceObject.existsSync(paths.queue)
+            ? external_node_fs_namespaceObject.readFileSync(paths.queue, 'utf8').split('\n').filter((l) => l.trim() && l.trim() !== SENTINEL).length
+            : 0;
+        core.warning(`wispy: uploader did not write status.json (likely crashed); ` +
+            `at least ${queueLines} paths may have been lost`);
         core.setOutput('paths-pushed', 0);
         core.setOutput('bytes-pushed', 0);
-        core.setOutput('paths-failed', 0);
+        core.setOutput('paths-failed', queueLines);
     }
     dumpUploaderLog(paths.log);
     shredSigningKey(paths.signingKey);
-    await cleanupNixConf();
+    await cleanupNixConf(paths.dir);
     await cleanupDaemonDropin();
 }
 run().catch((err) => {

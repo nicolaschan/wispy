@@ -14,6 +14,70 @@ const promises_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.ur
 const external_node_child_process_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:child_process");
 ;// CONCATENATED MODULE: external "node:util"
 const external_node_util_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:util");
+;// CONCATENATED MODULE: ./src/contract.ts
+
+function writeStatus(path, s) {
+    (0,external_node_fs_namespaceObject.writeFileSync)(path, JSON.stringify(s, null, 2));
+}
+function readStatus(path) {
+    const raw = JSON.parse(readFileSync(path, 'utf8'));
+    if (!raw || typeof raw !== 'object') {
+        throw new Error(`status.json malformed: not an object`);
+    }
+    const o = raw;
+    if (typeof o.pathsPushed !== 'number' ||
+        typeof o.bytesPushed !== 'number' ||
+        typeof o.pathsFailed !== 'number' ||
+        typeof o.wallTimeMs !== 'number') {
+        throw new Error(`status.json malformed: missing required numeric fields`);
+    }
+    return {
+        pathsPushed: o.pathsPushed,
+        bytesPushed: o.bytesPushed,
+        pathsFailed: o.pathsFailed,
+        wallTimeMs: o.wallTimeMs,
+    };
+}
+const ENV_KEYS = {
+    queueFile: 'WISPY_QUEUE_FILE',
+    statusFile: 'WISPY_STATUS_FILE',
+    destUrl: 'WISPY_DEST_URL',
+    concurrency: 'WISPY_UPLOAD_CONCURRENCY',
+    awsAccessKeyId: 'AWS_ACCESS_KEY_ID',
+    awsSecretAccessKey: 'AWS_SECRET_ACCESS_KEY',
+};
+function serializeUploaderEnv(env) {
+    return {
+        [ENV_KEYS.queueFile]: env.queueFile,
+        [ENV_KEYS.statusFile]: env.statusFile,
+        [ENV_KEYS.destUrl]: env.destUrl,
+        [ENV_KEYS.concurrency]: String(env.concurrency),
+        [ENV_KEYS.awsAccessKeyId]: env.awsAccessKeyId,
+        [ENV_KEYS.awsSecretAccessKey]: env.awsSecretAccessKey,
+    };
+}
+function parseUploaderEnv(source) {
+    function need(key) {
+        const v = source[key];
+        if (!v)
+            throw new Error(`Uploader missing env var: ${key}`);
+        return v;
+    }
+    const concurrencyRaw = need(ENV_KEYS.concurrency);
+    const concurrency = Number.parseInt(concurrencyRaw, 10);
+    if (!Number.isFinite(concurrency) || concurrency < 1) {
+        throw new Error(`Uploader ${ENV_KEYS.concurrency} must be a positive integer (got "${concurrencyRaw}")`);
+    }
+    return {
+        queueFile: need(ENV_KEYS.queueFile),
+        statusFile: need(ENV_KEYS.statusFile),
+        destUrl: need(ENV_KEYS.destUrl),
+        concurrency,
+        awsAccessKeyId: need(ENV_KEYS.awsAccessKeyId),
+        awsSecretAccessKey: need(ENV_KEYS.awsSecretAccessKey),
+    };
+}
+
 ;// CONCATENATED MODULE: ./src/queue.ts
 const SENTINEL = '__WISPY_EOF__';
 class QueueParser {
@@ -54,21 +118,8 @@ class QueueParser {
 
 
 
+
 const exec = (0,external_node_util_namespaceObject.promisify)(external_node_child_process_namespaceObject.execFile);
-function envOrThrow(key) {
-    const v = process.env[key];
-    if (!v)
-        throw new Error(`Uploader missing env var: ${key}`);
-    return v;
-}
-function readEnv() {
-    return {
-        queueFile: envOrThrow('WISPY_QUEUE_FILE'),
-        statusFile: envOrThrow('WISPY_STATUS_FILE'),
-        destUrl: envOrThrow('WISPY_DEST_URL'),
-        concurrency: Number.parseInt(envOrThrow('WISPY_UPLOAD_CONCURRENCY'), 10),
-    };
-}
 async function copyPath(destUrl, path) {
     // `nix copy --to <url> <path>` uploads the path's signed NAR + narinfo.
     // Stderr contains progress; we don't parse it for byte counts in v1.
@@ -127,7 +178,7 @@ class WorkPool {
     }
 }
 async function main() {
-    const env = readEnv();
+    const env = parseUploaderEnv(process.env);
     const started = Date.now();
     const parser = new QueueParser();
     const pool = new WorkPool(env.concurrency);
@@ -176,7 +227,7 @@ async function main() {
     }
     await Promise.all(inflight);
     status.wallTimeMs = Date.now() - started;
-    await (0,promises_namespaceObject.writeFile)(env.statusFile, JSON.stringify(status, null, 2));
+    writeStatus(env.statusFile, status);
 }
 main().catch((err) => {
     console.error(`uploader fatal: ${err instanceof Error ? err.stack : String(err)}`);

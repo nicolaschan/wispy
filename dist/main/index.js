@@ -53667,6 +53667,70 @@ var external_node_fs_ = __nccwpck_require__(3024);
 var external_node_path_ = __nccwpck_require__(6760);
 // EXTERNAL MODULE: external "node:child_process"
 var external_node_child_process_ = __nccwpck_require__(1421);
+;// CONCATENATED MODULE: ./src/contract.ts
+
+function writeStatus(path, s) {
+    writeFileSync(path, JSON.stringify(s, null, 2));
+}
+function readStatus(path) {
+    const raw = JSON.parse(readFileSync(path, 'utf8'));
+    if (!raw || typeof raw !== 'object') {
+        throw new Error(`status.json malformed: not an object`);
+    }
+    const o = raw;
+    if (typeof o.pathsPushed !== 'number' ||
+        typeof o.bytesPushed !== 'number' ||
+        typeof o.pathsFailed !== 'number' ||
+        typeof o.wallTimeMs !== 'number') {
+        throw new Error(`status.json malformed: missing required numeric fields`);
+    }
+    return {
+        pathsPushed: o.pathsPushed,
+        bytesPushed: o.bytesPushed,
+        pathsFailed: o.pathsFailed,
+        wallTimeMs: o.wallTimeMs,
+    };
+}
+const ENV_KEYS = {
+    queueFile: 'WISPY_QUEUE_FILE',
+    statusFile: 'WISPY_STATUS_FILE',
+    destUrl: 'WISPY_DEST_URL',
+    concurrency: 'WISPY_UPLOAD_CONCURRENCY',
+    awsAccessKeyId: 'AWS_ACCESS_KEY_ID',
+    awsSecretAccessKey: 'AWS_SECRET_ACCESS_KEY',
+};
+function serializeUploaderEnv(env) {
+    return {
+        [ENV_KEYS.queueFile]: env.queueFile,
+        [ENV_KEYS.statusFile]: env.statusFile,
+        [ENV_KEYS.destUrl]: env.destUrl,
+        [ENV_KEYS.concurrency]: String(env.concurrency),
+        [ENV_KEYS.awsAccessKeyId]: env.awsAccessKeyId,
+        [ENV_KEYS.awsSecretAccessKey]: env.awsSecretAccessKey,
+    };
+}
+function parseUploaderEnv(source) {
+    function need(key) {
+        const v = source[key];
+        if (!v)
+            throw new Error(`Uploader missing env var: ${key}`);
+        return v;
+    }
+    const concurrencyRaw = need(ENV_KEYS.concurrency);
+    const concurrency = Number.parseInt(concurrencyRaw, 10);
+    if (!Number.isFinite(concurrency) || concurrency < 1) {
+        throw new Error(`Uploader ${ENV_KEYS.concurrency} must be a positive integer (got "${concurrencyRaw}")`);
+    }
+    return {
+        queueFile: need(ENV_KEYS.queueFile),
+        statusFile: need(ENV_KEYS.statusFile),
+        destUrl: need(ENV_KEYS.destUrl),
+        concurrency,
+        awsAccessKeyId: need(ENV_KEYS.awsAccessKeyId),
+        awsSecretAccessKey: need(ENV_KEYS.awsSecretAccessKey),
+    };
+}
+
 ;// CONCATENATED MODULE: ./src/inputs.ts
 const KEYPAIR_FORMAT = /^[A-Za-z0-9._-]+:[A-Za-z0-9+/=]+$/;
 function required(raw, key) {
@@ -53729,6 +53793,8 @@ function removeWispyBlock(existing) {
 
 ;// CONCATENATED MODULE: ./src/paths.ts
 
+
+
 const NIX_CONF_PATH = '/etc/nix/nix.conf';
 const DAEMON_DROPIN_PATH = '/etc/systemd/system/nix-daemon.service.d/wispy.conf';
 function runtimeDir() {
@@ -53749,6 +53815,22 @@ function makeRuntimePaths() {
         log: external_node_path_.join(dir, 'uploader.log'),
         daemonEnv: external_node_path_.join(dir, 'daemon-env'),
     };
+}
+/**
+ * Write content to a system path that requires root (uses `sudo cp`).
+ * Stages via a unique temp file in our runtime dir to avoid /tmp collisions
+ * with parallel jobs and to keep the cleanup in one place.
+ */
+async function writeSystemFileViaSudo(content, destPath, stagingDir) {
+    const stage = external_node_path_.join(stagingDir, `staged-${external_node_path_.basename(destPath)}-${process.pid}`);
+    external_node_fs_.writeFileSync(stage, content);
+    try {
+        await (0,exec.exec)('sudo', ['cp', stage, destPath]);
+    }
+    finally {
+        if (external_node_fs_.existsSync(stage))
+            external_node_fs_.unlinkSync(stage);
+    }
 }
 
 // EXTERNAL MODULE: ./node_modules/@aws-sdk/client-s3/dist-cjs/index.js
@@ -53789,6 +53871,7 @@ async function smokeTestBucket(creds) {
 }
 
 ;// CONCATENATED MODULE: ./src/main.ts
+
 
 
 
@@ -53841,10 +53924,8 @@ async function installDaemonEnv(paths, inputs) {
         `AWS_SECRET_ACCESS_KEY=${inputs.r2SecretAccessKey}\n`;
     external_node_fs_.writeFileSync(paths.daemonEnv, envContent, { mode: 0o600 });
     const dropin = `[Service]\nEnvironmentFile=${paths.daemonEnv}\n`;
-    external_node_fs_.writeFileSync('/tmp/wispy-dropin.conf', dropin);
     await (0,exec.exec)('sudo', ['mkdir', '-p', external_node_path_.dirname(DAEMON_DROPIN_PATH)]);
-    await (0,exec.exec)('sudo', ['cp', '/tmp/wispy-dropin.conf', DAEMON_DROPIN_PATH]);
-    external_node_fs_.unlinkSync('/tmp/wispy-dropin.conf');
+    await writeSystemFileViaSudo(dropin, DAEMON_DROPIN_PATH, paths.dir);
     await (0,exec.exec)('sudo', ['systemctl', 'daemon-reload']);
 }
 function materializeHook(actionDir, paths) {
@@ -53859,12 +53940,10 @@ function ensureQueueFile(queuePath) {
     external_node_fs_.writeFileSync(queuePath, '', { mode: 0o666 });
     external_node_fs_.chmodSync(queuePath, 0o666);
 }
-async function updateNixConf(blockBody) {
+async function updateNixConf(blockBody, paths) {
     const existing = external_node_fs_.existsSync(NIX_CONF_PATH) ? external_node_fs_.readFileSync(NIX_CONF_PATH, 'utf8') : '';
     const next = applyWispyBlock(existing, blockBody);
-    external_node_fs_.writeFileSync('/tmp/wispy-nix.conf.new', next);
-    await (0,exec.exec)('sudo', ['cp', '/tmp/wispy-nix.conf.new', NIX_CONF_PATH]);
-    external_node_fs_.unlinkSync('/tmp/wispy-nix.conf.new');
+    await writeSystemFileViaSudo(next, NIX_CONF_PATH, paths.dir);
 }
 async function restartDaemon() {
     await (0,exec.exec)('sudo', ['systemctl', 'restart', 'nix-daemon']);
@@ -53877,12 +53956,14 @@ function spawnUploader(paths, inputs, destUrl) {
         stdio: ['ignore', logFd, logFd],
         env: {
             ...process.env,
-            WISPY_QUEUE_FILE: paths.queue,
-            WISPY_STATUS_FILE: paths.status,
-            WISPY_DEST_URL: destUrl,
-            WISPY_UPLOAD_CONCURRENCY: String(inputs.uploadConcurrency),
-            AWS_ACCESS_KEY_ID: inputs.r2AccessKeyId,
-            AWS_SECRET_ACCESS_KEY: inputs.r2SecretAccessKey,
+            ...serializeUploaderEnv({
+                queueFile: paths.queue,
+                statusFile: paths.status,
+                destUrl,
+                concurrency: inputs.uploadConcurrency,
+                awsAccessKeyId: inputs.r2AccessKeyId,
+                awsSecretAccessKey: inputs.r2SecretAccessKey,
+            }),
         },
     });
     child.unref();
@@ -53912,7 +53993,7 @@ async function run() {
         accessKeyId: inputs.r2AccessKeyId,
         secretAccessKey: inputs.r2SecretAccessKey,
     });
-    await updateNixConf(buildNixConfBlock(inputs, paths, destUrl));
+    await updateNixConf(buildNixConfBlock(inputs, paths, destUrl), paths);
     await installDaemonEnv(paths, inputs);
     await restartDaemon();
     if (!inputs.skipPush) {

@@ -1,0 +1,19 @@
+name = "wispy"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# The cache name appears in signatures: <CACHE_NAME>:<base64-sig>.
+# Set to a stable identifier for this cache.
+[vars]
+CACHE_NAME = "wispy-default"
+STORE_DIR = "/nix/store"
+
+# Bind the R2 bucket holding nix-cache-info, narinfos, and NARs.
+# setup.mjs creates the bucket and rewrites bucket_name to match.
+[[r2_buckets]]
+binding = "CACHE_BUCKET"
+bucket_name = "wispy-default"
+
+# Secrets (set via `wrangler secret put`):
+#   SIGNING_PRIVATE_KEY  – Nix-format ed25519 private key, base64 of 64 bytes
+#   JWT_ROOT_SECRET      – 32 random bytes, base64

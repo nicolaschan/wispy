@@ -3,3 +3,5 @@ build-out/
 *.log
 .DS_Store
 coverage/
+result
+result-*

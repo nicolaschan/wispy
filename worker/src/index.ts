@@ -133,27 +133,32 @@ async function handlePutNar(
 const NARINFO_PATH = /^\/([0-9a-z]+)\.narinfo$/;
 const NAR_PATH = /^\/nar\/([0-9a-z]+)\.nar\.([a-z0-9]+)$/;
 
+// Exported so tests can drive the worker with an in-memory R2Like fake
+// without going through the Workers binding adapter.
+export async function handleRequest(req: Request, env: Env, r2: R2Like): Promise<Response> {
+  const url = new URL(req.url);
+
+  if (url.pathname === '/nix-cache-info' && req.method === 'GET') {
+    return handleGetCacheInfo(req, r2);
+  }
+  const narinfoMatch = NARINFO_PATH.exec(url.pathname);
+  if (narinfoMatch) {
+    const hash = narinfoMatch[1]!;
+    if (req.method === 'GET') return handleGetNarinfo(hash, r2);
+    if (req.method === 'PUT') return handlePutNarinfo(hash, req, env, r2);
+  }
+  const narMatch = NAR_PATH.exec(url.pathname);
+  if (narMatch) {
+    const filehash = narMatch[1]!;
+    const ext = narMatch[2]!;
+    if (req.method === 'GET') return handleGetNar(filehash, ext, r2);
+    if (req.method === 'PUT') return handlePutNar(filehash, ext, req, env, r2);
+  }
+  return new Response('not found', { status: 404 });
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
-    const url = new URL(req.url);
-    const r2 = r2FromBinding(env.CACHE_BUCKET);
-
-    if (url.pathname === '/nix-cache-info' && req.method === 'GET') {
-      return handleGetCacheInfo(req, r2);
-    }
-    const narinfoMatch = NARINFO_PATH.exec(url.pathname);
-    if (narinfoMatch) {
-      const hash = narinfoMatch[1]!;
-      if (req.method === 'GET') return handleGetNarinfo(hash, r2);
-      if (req.method === 'PUT') return handlePutNarinfo(hash, req, env, r2);
-    }
-    const narMatch = NAR_PATH.exec(url.pathname);
-    if (narMatch) {
-      const filehash = narMatch[1]!;
-      const ext = narMatch[2]!;
-      if (req.method === 'GET') return handleGetNar(filehash, ext, r2);
-      if (req.method === 'PUT') return handlePutNar(filehash, ext, req, env, r2);
-    }
-    return new Response('not found', { status: 404 });
+    return handleRequest(req, env, r2FromBinding(env.CACHE_BUCKET));
   },
 };

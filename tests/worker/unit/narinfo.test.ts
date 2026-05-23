@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseNarinfo, serializeNarinfo, fingerprint, type Narinfo } from '../../worker/src/narinfo.js';
+import { parseNarinfo, serializeNarinfo, fingerprint, type Narinfo } from '../../../worker/src/narinfo.js';
 
 const fixturePath = (name: string) =>
-  join(import.meta.dirname, '..', 'fixtures', name);
+  join(import.meta.dirname, '..', '..', 'fixtures', name);
 
 describe('parseNarinfo', () => {
   it('extracts every required field from the fixture', () => {

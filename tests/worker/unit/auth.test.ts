@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { issueToken, verifyToken, type TokenPayload } from '../../worker/src/auth.js';
+import { issueToken, verifyToken } from '../../../worker/src/auth.js';
 
 const secret = new TextEncoder().encode('test-secret-do-not-use-in-prod');
 

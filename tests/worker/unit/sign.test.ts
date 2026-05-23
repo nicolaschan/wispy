@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createPublicKey, verify } from 'node:crypto';
-import { signFingerprint, type SigningKey } from '../../worker/src/sign.js';
+import { signFingerprint, type SigningKey } from '../../../worker/src/sign.js';
 
 const key: SigningKey = JSON.parse(
-  readFileSync(join(import.meta.dirname, '..', 'fixtures', 'signing-test-key.json'), 'utf8')
+  readFileSync(join(import.meta.dirname, '..', '..', 'fixtures', 'signing-test-key.json'), 'utf8')
 );
 
 function ed25519PubFromRaw(raw: Buffer): ReturnType<typeof createPublicKey> {

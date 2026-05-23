@@ -2,13 +2,7 @@ import * as core from '@actions/core';
 import { exec } from '@actions/exec';
 import * as fs from 'node:fs';
 import { readStatus } from './contract.js';
-import { removeWispyBlock } from './nixconf.js';
-import {
-  DAEMON_DROPIN_PATH,
-  NIX_CONF_PATH,
-  makeRuntimePaths,
-  writeSystemFileViaSudo,
-} from './paths.js';
+import { DAEMON_DROPIN_PATH, makeRuntimePaths } from './paths.js';
 import { SENTINEL } from './queue.js';
 
 const SHUTDOWN_GRACE_MS = 60_000;
@@ -30,14 +24,6 @@ async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
   return false;
-}
-
-async function cleanupNixConf(stagingDir: string): Promise<void> {
-  if (!fs.existsSync(NIX_CONF_PATH)) return;
-  const existing = fs.readFileSync(NIX_CONF_PATH, 'utf8');
-  const cleaned = removeWispyBlock(existing);
-  if (cleaned === existing) return;
-  await writeSystemFileViaSudo(cleaned, NIX_CONF_PATH, stagingDir);
 }
 
 async function cleanupDaemonDropin(): Promise<void> {
@@ -126,7 +112,6 @@ async function run(): Promise<void> {
 
   dumpUploaderLog(paths.log);
   shredSigningKey(paths.signingKey);
-  await cleanupNixConf(paths.dir);
   await cleanupDaemonDropin();
 }
 

@@ -2,7 +2,6 @@ import { exec } from '@actions/exec';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-export const NIX_CONF_PATH = '/etc/nix/nix.conf';
 export const DAEMON_DROPIN_PATH = '/etc/systemd/system/nix-daemon.service.d/wispy.conf';
 
 export interface RuntimePaths {

@@ -27428,7 +27428,7 @@ var __webpack_exports__ = {};
 // EXTERNAL MODULE: ./node_modules/@actions/core/lib/core.js
 var core = __nccwpck_require__(7484);
 // EXTERNAL MODULE: ./node_modules/@actions/exec/lib/exec.js
-var exec = __nccwpck_require__(5236);
+var lib_exec = __nccwpck_require__(5236);
 ;// CONCATENATED MODULE: external "node:fs"
 const external_node_fs_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
 ;// CONCATENATED MODULE: ./src/contract.ts
@@ -27495,26 +27495,12 @@ function parseUploaderEnv(source) {
     };
 }
 
-;// CONCATENATED MODULE: ./src/nixconf.ts
-const BEGIN = '# >>> wispy >>>';
-const END = '# <<< wispy <<<';
-const BLOCK_RE = /# >>> wispy >>>[\s\S]*?# <<< wispy <<<\n?/g;
-function applyWispyBlock(existing, blockBody) {
-    const cleaned = removeWispyBlock(existing);
-    const prefix = cleaned.length > 0 && !cleaned.endsWith('\n') ? cleaned + '\n' : cleaned;
-    return `${prefix}${BEGIN}\n${blockBody}\n${END}\n`;
-}
-function removeWispyBlock(existing) {
-    return existing.replace(BLOCK_RE, '');
-}
-
 ;// CONCATENATED MODULE: external "node:path"
 const external_node_path_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:path");
 ;// CONCATENATED MODULE: ./src/paths.ts
 
 
 
-const NIX_CONF_PATH = '/etc/nix/nix.conf';
 const DAEMON_DROPIN_PATH = '/etc/systemd/system/nix-daemon.service.d/wispy.conf';
 function runtimeDir() {
     const runnerTemp = process.env.RUNNER_TEMP;
@@ -27541,14 +27527,14 @@ function makeRuntimePaths() {
  * with parallel jobs and to keep the cleanup in one place.
  */
 async function writeSystemFileViaSudo(content, destPath, stagingDir) {
-    const stage = external_node_path_namespaceObject.join(stagingDir, `staged-${external_node_path_namespaceObject.basename(destPath)}-${process.pid}`);
-    external_node_fs_namespaceObject.writeFileSync(stage, content);
+    const stage = path.join(stagingDir, `staged-${path.basename(destPath)}-${process.pid}`);
+    fs.writeFileSync(stage, content);
     try {
-        await (0,exec.exec)('sudo', ['cp', stage, destPath]);
+        await exec('sudo', ['cp', stage, destPath]);
     }
     finally {
-        if (external_node_fs_namespaceObject.existsSync(stage))
-            external_node_fs_namespaceObject.unlinkSync(stage);
+        if (fs.existsSync(stage))
+            fs.unlinkSync(stage);
     }
 }
 
@@ -27593,7 +27579,6 @@ class QueueParser {
 
 
 
-
 const SHUTDOWN_GRACE_MS = 60_000;
 const POLL_INTERVAL_MS = 250;
 function pidIsAlive(pid) {
@@ -27614,22 +27599,13 @@ async function waitForExit(pid, timeoutMs) {
     }
     return false;
 }
-async function cleanupNixConf(stagingDir) {
-    if (!external_node_fs_namespaceObject.existsSync(NIX_CONF_PATH))
-        return;
-    const existing = external_node_fs_namespaceObject.readFileSync(NIX_CONF_PATH, 'utf8');
-    const cleaned = removeWispyBlock(existing);
-    if (cleaned === existing)
-        return;
-    await writeSystemFileViaSudo(cleaned, NIX_CONF_PATH, stagingDir);
-}
 async function cleanupDaemonDropin() {
     // Remove the systemd drop-in that injected AWS creds into nix-daemon's
     // env, then reload + restart so the daemon no longer holds them.
     try {
-        await (0,exec.exec)('sudo', ['rm', '-f', DAEMON_DROPIN_PATH]);
-        await (0,exec.exec)('sudo', ['systemctl', 'daemon-reload']);
-        await (0,exec.exec)('sudo', ['systemctl', 'restart', 'nix-daemon']);
+        await (0,lib_exec.exec)('sudo', ['rm', '-f', DAEMON_DROPIN_PATH]);
+        await (0,lib_exec.exec)('sudo', ['systemctl', 'daemon-reload']);
+        await (0,lib_exec.exec)('sudo', ['systemctl', 'restart', 'nix-daemon']);
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -27705,7 +27681,6 @@ async function run() {
     }
     dumpUploaderLog(paths.log);
     shredSigningKey(paths.signingKey);
-    await cleanupNixConf(paths.dir);
     await cleanupDaemonDropin();
 }
 run().catch((err) => {

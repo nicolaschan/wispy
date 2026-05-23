@@ -53780,24 +53780,10 @@ function parseInputs(raw) {
     };
 }
 
-;// CONCATENATED MODULE: ./src/nixconf.ts
-const BEGIN = '# >>> wispy >>>';
-const END = '# <<< wispy <<<';
-const BLOCK_RE = /# >>> wispy >>>[\s\S]*?# <<< wispy <<<\n?/g;
-function applyWispyBlock(existing, blockBody) {
-    const cleaned = removeWispyBlock(existing);
-    const prefix = cleaned.length > 0 && !cleaned.endsWith('\n') ? cleaned + '\n' : cleaned;
-    return `${prefix}${BEGIN}\n${blockBody}\n${END}\n`;
-}
-function removeWispyBlock(existing) {
-    return existing.replace(BLOCK_RE, '');
-}
-
 ;// CONCATENATED MODULE: ./src/paths.ts
 
 
 
-const NIX_CONF_PATH = '/etc/nix/nix.conf';
 const DAEMON_DROPIN_PATH = '/etc/systemd/system/nix-daemon.service.d/wispy.conf';
 function runtimeDir() {
     const runnerTemp = process.env.RUNNER_TEMP;
@@ -53883,7 +53869,6 @@ async function smokeTestBucket(creds) {
 
 
 
-
 function readActionInputs() {
     const keys = [
         'r2-bucket',
@@ -53906,7 +53891,7 @@ function readActionInputs() {
 // checkout root is two directories up. GITHUB_ACTION_PATH would be cleaner
 // but the runner only sets it for composite actions, not node20 actions.
 const ACTION_ROOT = external_node_path_.resolve(external_node_path_.dirname((0,external_node_url_.fileURLToPath)(import.meta.url)), '..', '..');
-function buildNixConfBlock(inputs, paths, destUrl) {
+function buildUserNixConf(inputs, paths, destUrl) {
     const lines = [
         `extra-substituters = ${destUrl} ${inputs.extraSubstituters.join(' ')}`.trim(),
         `extra-trusted-public-keys = ${inputs.signingPublicKey} ${inputs.extraTrustedPublicKeys.join(' ')}`.trim(),
@@ -53915,7 +53900,17 @@ function buildNixConfBlock(inputs, paths, destUrl) {
         lines.push(`secret-key-files = ${paths.signingKey}`);
         lines.push(`post-build-hook = ${paths.hook}`);
     }
-    return lines.join('\n');
+    return lines.join('\n') + '\n';
+}
+function registerUserNixConf(configPath) {
+    // Prepending to NIX_USER_CONF_FILES makes our settings win over anything an
+    // earlier action wrote. We deliberately don't touch /etc/nix/nix.conf:
+    // trusted users (the runner is one) can set post-build-hook / substituters
+    // through user-level config and the daemon honors them per-connection. This
+    // avoids sudo and a daemon restart for the config side.
+    const existing = process.env.NIX_USER_CONF_FILES ?? '';
+    const chain = existing ? `${configPath}:${existing}` : configPath;
+    core.exportVariable('NIX_USER_CONF_FILES', chain);
 }
 async function installDaemonEnv(paths, inputs) {
     // nix-daemon needs AWS creds in its OWN environment to substitute from
@@ -53940,11 +53935,6 @@ function writeSigningKey(privateKey, dest) {
 function ensureQueueFile(queuePath) {
     external_node_fs_.writeFileSync(queuePath, '', { mode: 0o666 });
     external_node_fs_.chmodSync(queuePath, 0o666);
-}
-async function updateNixConf(blockBody, paths) {
-    const existing = external_node_fs_.existsSync(NIX_CONF_PATH) ? external_node_fs_.readFileSync(NIX_CONF_PATH, 'utf8') : '';
-    const next = applyWispyBlock(existing, blockBody);
-    await writeSystemFileViaSudo(next, NIX_CONF_PATH, paths.dir);
 }
 async function restartDaemon() {
     await (0,exec.exec)('sudo', ['systemctl', 'restart', 'nix-daemon']);
@@ -53994,7 +53984,13 @@ async function run() {
         accessKeyId: inputs.r2AccessKeyId,
         secretAccessKey: inputs.r2SecretAccessKey,
     });
-    await updateNixConf(buildNixConfBlock(inputs, paths, destUrl), paths);
+    const userNixConfPath = external_node_path_.join(paths.dir, 'nix.conf');
+    external_node_fs_.writeFileSync(userNixConfPath, buildUserNixConf(inputs, paths, destUrl), { mode: 0o644 });
+    registerUserNixConf(userNixConfPath);
+    // The daemon does s3:// fetches itself when substituting, so it needs AWS
+    // creds in its own environment. Settings forwarded via NIX_USER_CONF_FILES
+    // don't reach the daemon's process env, so this part still requires a
+    // systemd drop-in and restart.
     await installDaemonEnv(paths, inputs);
     await restartDaemon();
     if (!inputs.skipPush) {

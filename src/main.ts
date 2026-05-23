@@ -6,10 +6,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { serializeUploaderEnv } from './contract.js';
 import { parseInputs, type Inputs, type RawInputs } from './inputs.js';
-import { applyWispyBlock } from './nixconf.js';
 import {
   DAEMON_DROPIN_PATH,
-  NIX_CONF_PATH,
   makeRuntimePaths,
   writeSystemFileViaSudo,
   type RuntimePaths,
@@ -39,7 +37,7 @@ function readActionInputs(): RawInputs {
 // but the runner only sets it for composite actions, not node20 actions.
 const ACTION_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-function buildNixConfBlock(inputs: Inputs, paths: RuntimePaths, destUrl: string): string {
+function buildUserNixConf(inputs: Inputs, paths: RuntimePaths, destUrl: string): string {
   const lines = [
     `extra-substituters = ${destUrl} ${inputs.extraSubstituters.join(' ')}`.trim(),
     `extra-trusted-public-keys = ${inputs.signingPublicKey} ${inputs.extraTrustedPublicKeys.join(' ')}`.trim(),
@@ -48,7 +46,18 @@ function buildNixConfBlock(inputs: Inputs, paths: RuntimePaths, destUrl: string)
     lines.push(`secret-key-files = ${paths.signingKey}`);
     lines.push(`post-build-hook = ${paths.hook}`);
   }
-  return lines.join('\n');
+  return lines.join('\n') + '\n';
+}
+
+function registerUserNixConf(configPath: string): void {
+  // Prepending to NIX_USER_CONF_FILES makes our settings win over anything an
+  // earlier action wrote. We deliberately don't touch /etc/nix/nix.conf:
+  // trusted users (the runner is one) can set post-build-hook / substituters
+  // through user-level config and the daemon honors them per-connection. This
+  // avoids sudo and a daemon restart for the config side.
+  const existing = process.env.NIX_USER_CONF_FILES ?? '';
+  const chain = existing ? `${configPath}:${existing}` : configPath;
+  core.exportVariable('NIX_USER_CONF_FILES', chain);
 }
 
 async function installDaemonEnv(paths: RuntimePaths, inputs: Inputs): Promise<void> {
@@ -79,12 +88,6 @@ function writeSigningKey(privateKey: string, dest: string): void {
 function ensureQueueFile(queuePath: string): void {
   fs.writeFileSync(queuePath, '', { mode: 0o666 });
   fs.chmodSync(queuePath, 0o666);
-}
-
-async function updateNixConf(blockBody: string, paths: RuntimePaths): Promise<void> {
-  const existing = fs.existsSync(NIX_CONF_PATH) ? fs.readFileSync(NIX_CONF_PATH, 'utf8') : '';
-  const next = applyWispyBlock(existing, blockBody);
-  await writeSystemFileViaSudo(next, NIX_CONF_PATH, paths.dir);
 }
 
 async function restartDaemon(): Promise<void> {
@@ -141,7 +144,14 @@ async function run(): Promise<void> {
     secretAccessKey: inputs.r2SecretAccessKey,
   });
 
-  await updateNixConf(buildNixConfBlock(inputs, paths, destUrl), paths);
+  const userNixConfPath = path.join(paths.dir, 'nix.conf');
+  fs.writeFileSync(userNixConfPath, buildUserNixConf(inputs, paths, destUrl), { mode: 0o644 });
+  registerUserNixConf(userNixConfPath);
+
+  // The daemon does s3:// fetches itself when substituting, so it needs AWS
+  // creds in its own environment. Settings forwarded via NIX_USER_CONF_FILES
+  // don't reach the daemon's process env, so this part still requires a
+  // systemd drop-in and restart.
   await installDaemonEnv(paths, inputs);
   await restartDaemon();
 

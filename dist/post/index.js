@@ -27427,261 +27427,37 @@ var __webpack_exports__ = {};
 
 // EXTERNAL MODULE: ./node_modules/@actions/core/lib/core.js
 var core = __nccwpck_require__(7484);
-// EXTERNAL MODULE: ./node_modules/@actions/exec/lib/exec.js
-var lib_exec = __nccwpck_require__(5236);
 ;// CONCATENATED MODULE: external "node:fs"
 const external_node_fs_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
-;// CONCATENATED MODULE: ./src/contract.ts
-
-function writeStatus(path, s) {
-    writeFileSync(path, JSON.stringify(s, null, 2));
-}
-function readStatus(path) {
-    const raw = JSON.parse((0,external_node_fs_namespaceObject.readFileSync)(path, 'utf8'));
-    if (!raw || typeof raw !== 'object') {
-        throw new Error(`status.json malformed: not an object`);
-    }
-    const o = raw;
-    if (typeof o.pathsPushed !== 'number' ||
-        typeof o.bytesPushed !== 'number' ||
-        typeof o.pathsFailed !== 'number' ||
-        typeof o.wallTimeMs !== 'number') {
-        throw new Error(`status.json malformed: missing required numeric fields`);
-    }
-    return {
-        pathsPushed: o.pathsPushed,
-        bytesPushed: o.bytesPushed,
-        pathsFailed: o.pathsFailed,
-        wallTimeMs: o.wallTimeMs,
-    };
-}
-const ENV_KEYS = {
-    queueFile: 'WISPY_QUEUE_FILE',
-    statusFile: 'WISPY_STATUS_FILE',
-    destUrl: 'WISPY_DEST_URL',
-    concurrency: 'WISPY_UPLOAD_CONCURRENCY',
-    awsAccessKeyId: 'AWS_ACCESS_KEY_ID',
-    awsSecretAccessKey: 'AWS_SECRET_ACCESS_KEY',
-};
-function serializeUploaderEnv(env) {
-    return {
-        [ENV_KEYS.queueFile]: env.queueFile,
-        [ENV_KEYS.statusFile]: env.statusFile,
-        [ENV_KEYS.destUrl]: env.destUrl,
-        [ENV_KEYS.concurrency]: String(env.concurrency),
-        [ENV_KEYS.awsAccessKeyId]: env.awsAccessKeyId,
-        [ENV_KEYS.awsSecretAccessKey]: env.awsSecretAccessKey,
-    };
-}
-function parseUploaderEnv(source) {
-    function need(key) {
-        const v = source[key];
-        if (!v)
-            throw new Error(`Uploader missing env var: ${key}`);
-        return v;
-    }
-    const concurrencyRaw = need(ENV_KEYS.concurrency);
-    const concurrency = Number.parseInt(concurrencyRaw, 10);
-    if (!Number.isFinite(concurrency) || concurrency < 1) {
-        throw new Error(`Uploader ${ENV_KEYS.concurrency} must be a positive integer (got "${concurrencyRaw}")`);
-    }
-    return {
-        queueFile: need(ENV_KEYS.queueFile),
-        statusFile: need(ENV_KEYS.statusFile),
-        destUrl: need(ENV_KEYS.destUrl),
-        concurrency,
-        awsAccessKeyId: need(ENV_KEYS.awsAccessKeyId),
-        awsSecretAccessKey: need(ENV_KEYS.awsSecretAccessKey),
-    };
-}
-
 ;// CONCATENATED MODULE: external "node:path"
 const external_node_path_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:path");
-;// CONCATENATED MODULE: ./src/paths.ts
-
-
-
-const DAEMON_DROPIN_PATH = '/etc/systemd/system/nix-daemon.service.d/wispy.conf';
-function runtimeDir() {
-    const runnerTemp = process.env.RUNNER_TEMP;
-    if (!runnerTemp)
-        throw new Error('RUNNER_TEMP is not set');
-    return external_node_path_namespaceObject.join(runnerTemp, 'wispy');
-}
-function makeRuntimePaths() {
-    const dir = runtimeDir();
-    return {
-        dir,
-        signingKey: external_node_path_namespaceObject.join(dir, 'signing.key'),
-        hook: external_node_path_namespaceObject.join(dir, 'hook.sh'),
-        queue: external_node_path_namespaceObject.join(dir, 'queue'),
-        status: external_node_path_namespaceObject.join(dir, 'status.json'),
-        pid: external_node_path_namespaceObject.join(dir, 'uploader.pid'),
-        log: external_node_path_namespaceObject.join(dir, 'uploader.log'),
-        daemonEnv: external_node_path_namespaceObject.join(dir, 'daemon-env'),
-    };
-}
-/**
- * Write content to a system path that requires root (uses `sudo cp`).
- * Stages via a unique temp file in our runtime dir to avoid /tmp collisions
- * with parallel jobs and to keep the cleanup in one place.
- */
-async function writeSystemFileViaSudo(content, destPath, stagingDir) {
-    const stage = path.join(stagingDir, `staged-${path.basename(destPath)}-${process.pid}`);
-    fs.writeFileSync(stage, content);
-    try {
-        await exec('sudo', ['cp', stage, destPath]);
-    }
-    finally {
-        if (fs.existsSync(stage))
-            fs.unlinkSync(stage);
-    }
-}
-
-;// CONCATENATED MODULE: ./src/queue.ts
-const SENTINEL = '__WISPY_EOF__';
-class QueueParser {
-    buffer = '';
-    seen = new Set();
-    feed(chunk) {
-        this.buffer += chunk;
-        const newlineIdx = this.buffer.lastIndexOf('\n');
-        if (newlineIdx === -1) {
-            return { paths: [], sentinelSeen: false };
-        }
-        const complete = this.buffer.slice(0, newlineIdx);
-        this.buffer = this.buffer.slice(newlineIdx + 1);
-        const paths = [];
-        let sentinelSeen = false;
-        for (const line of complete.split('\n')) {
-            const trimmed = line.trim();
-            if (!trimmed)
-                continue;
-            if (trimmed === SENTINEL) {
-                sentinelSeen = true;
-                break;
-            }
-            for (const path of trimmed.split(/\s+/)) {
-                if (!path || this.seen.has(path))
-                    continue;
-                this.seen.add(path);
-                paths.push(path);
-            }
-        }
-        return { paths, sentinelSeen };
-    }
-}
-
 ;// CONCATENATED MODULE: ./src/post.ts
 
 
 
-
-
-
-const SHUTDOWN_GRACE_MS = 60_000;
-const POLL_INTERVAL_MS = 250;
-function pidIsAlive(pid) {
-    try {
-        process.kill(pid, 0);
-        return true;
-    }
-    catch {
-        return false;
-    }
-}
-async function waitForExit(pid, timeoutMs) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-        if (!pidIsAlive(pid))
-            return true;
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-    }
-    return false;
-}
-async function cleanupDaemonDropin() {
-    // Remove the systemd drop-in that injected AWS creds into nix-daemon's
-    // env, then reload + restart so the daemon no longer holds them.
-    try {
-        await (0,lib_exec.exec)('sudo', ['rm', '-f', DAEMON_DROPIN_PATH]);
-        await (0,lib_exec.exec)('sudo', ['systemctl', 'daemon-reload']);
-        await (0,lib_exec.exec)('sudo', ['systemctl', 'restart', 'nix-daemon']);
-    }
-    catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        core.warning(`wispy: failed to remove nix-daemon drop-in: ${msg}`);
-    }
-}
-function shredSigningKey(keyPath) {
-    if (!external_node_fs_namespaceObject.existsSync(keyPath))
+function shred(filePath) {
+    if (!external_node_fs_namespaceObject.existsSync(filePath))
         return;
     try {
-        const size = external_node_fs_namespaceObject.statSync(keyPath).size;
-        external_node_fs_namespaceObject.writeFileSync(keyPath, Buffer.alloc(size, 0));
+        const size = external_node_fs_namespaceObject.statSync(filePath).size;
+        external_node_fs_namespaceObject.writeFileSync(filePath, Buffer.alloc(size, 0));
     }
     catch {
-        // ignore — best-effort overwrite
+        // best-effort
     }
-    external_node_fs_namespaceObject.unlinkSync(keyPath);
-}
-function dumpUploaderLog(logPath) {
-    if (!external_node_fs_namespaceObject.existsSync(logPath))
-        return;
-    const content = external_node_fs_namespaceObject.readFileSync(logPath, 'utf8');
-    const tail = content.split('\n').slice(-50).join('\n');
-    if (tail.trim()) {
-        core.startGroup('wispy uploader log (last 50 lines)');
-        core.info(tail);
-        core.endGroup();
-    }
+    external_node_fs_namespaceObject.unlinkSync(filePath);
 }
 async function run() {
-    const paths = makeRuntimePaths();
-    let pid = null;
-    if (external_node_fs_namespaceObject.existsSync(paths.pid)) {
-        pid = Number.parseInt(external_node_fs_namespaceObject.readFileSync(paths.pid, 'utf8').trim(), 10);
-        if (!Number.isInteger(pid))
-            pid = null;
-    }
-    if (pid !== null && external_node_fs_namespaceObject.existsSync(paths.queue)) {
-        external_node_fs_namespaceObject.appendFileSync(paths.queue, `${SENTINEL}\n`);
-        const exited = await waitForExit(pid, SHUTDOWN_GRACE_MS);
-        if (!exited) {
-            core.warning(`wispy uploader (pid=${pid}) did not exit within ${SHUTDOWN_GRACE_MS}ms`);
-            try {
-                process.kill(pid, 'SIGTERM');
-            }
-            catch {
-                // already gone
-            }
-        }
-    }
-    if (external_node_fs_namespaceObject.existsSync(paths.status)) {
-        const parsed = readStatus(paths.status);
-        core.setOutput('paths-pushed', parsed.pathsPushed);
-        core.setOutput('bytes-pushed', parsed.bytesPushed);
-        core.setOutput('paths-failed', parsed.pathsFailed);
-        core.info(`wispy: pushed ${parsed.pathsPushed} paths (${parsed.bytesPushed} bytes), ` +
-            `${parsed.pathsFailed} failed, in ${parsed.wallTimeMs}ms`);
-        if (parsed.pathsFailed > 0) {
-            core.warning(`wispy: ${parsed.pathsFailed} paths failed to upload (see uploader log above)`);
-        }
-    }
-    else if (pid !== null) {
-        // Uploader started but never wrote status.json — likely crashed.
-        // Count un-pushed paths from the queue to give downstream steps a real signal.
-        const queueLines = external_node_fs_namespaceObject.existsSync(paths.queue)
-            ? external_node_fs_namespaceObject.readFileSync(paths.queue, 'utf8').split('\n').filter((l) => l.trim() && l.trim() !== SENTINEL).length
-            : 0;
-        core.warning(`wispy: uploader did not write status.json (likely crashed); ` +
-            `at least ${queueLines} paths may have been lost`);
-        core.setOutput('paths-pushed', 0);
-        core.setOutput('bytes-pushed', 0);
-        core.setOutput('paths-failed', queueLines);
-    }
-    dumpUploaderLog(paths.log);
-    shredSigningKey(paths.signingKey);
-    await cleanupDaemonDropin();
+    const t = process.env.RUNNER_TEMP;
+    if (!t)
+        return;
+    const dir = external_node_path_namespaceObject.join(t, 'wispy');
+    if (!external_node_fs_namespaceObject.existsSync(dir))
+        return;
+    // The netrc holds the bearer token. Zero it before deletion.
+    shred(external_node_path_namespaceObject.join(dir, 'netrc'));
+    // RUNNER_TEMP is cleaned by the runner; nothing else to do.
+    core.info('wispy: cleaned up netrc');
 }
 run().catch((err) => {
     const msg = err instanceof Error ? err.message : String(err);

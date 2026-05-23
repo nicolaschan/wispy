@@ -42,7 +42,10 @@
         default = pkgs.mkShellNoCC {
           packages = [
             pkgs.nodejs_24
+            pkgs.nodePackages.wrangler
+            pkgs.gh
             pkgs.shellcheck
+            pkgs.jq
             pkgs.git
           ];
         };

@@ -1,53 +1,17 @@
 name: 'wispy'
-description: 'Cache Nix builds on Cloudflare R2'
+description: 'Serverless Nix binary cache: Cloudflare Worker fronts R2 and signs paths'
 author: 'nicolaschan'
 branding:
   icon: 'archive'
   color: 'orange'
 
 inputs:
-  r2-bucket:
-    description: 'R2 bucket name'
+  server-url:
+    description: 'wispy Worker URL (e.g. https://cache.user.workers.dev)'
     required: true
-  r2-account-id:
-    description: 'Cloudflare account ID (used to build endpoint URL)'
+  token:
+    description: 'Push-scoped JWT issued by scripts/issue-token.mjs'
     required: true
-  r2-access-key-id:
-    description: "R2 API token's access key ID"
-    required: true
-  r2-secret-access-key:
-    description: "R2 API token's secret access key"
-    required: true
-  signing-private-key:
-    description: 'Full contents of the ed25519 binary cache private key file'
-    required: true
-  signing-public-key:
-    description: 'Public key string (e.g. wispy-foo-1:abc...=)'
-    required: true
-  upload-concurrency:
-    description: 'Maximum parallel `nix copy` invocations'
-    required: false
-    default: '8'
-  extra-substituters:
-    description: 'Space-separated substituter URLs merged into nix.conf'
-    required: false
-    default: 'https://cache.nixos.org/'
-  extra-trusted-public-keys:
-    description: 'Space-separated trusted public keys merged into nix.conf'
-    required: false
-    default: 'cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY='
-  skip-push:
-    description: 'If true, configure pull only (no signing key, no post-build-hook)'
-    required: false
-    default: 'false'
-
-outputs:
-  paths-pushed:
-    description: 'Count of unique store paths uploaded to R2'
-  bytes-pushed:
-    description: 'Sum of compressed NAR bytes uploaded'
-  paths-failed:
-    description: 'Count of paths that failed to upload'
 
 runs:
   using: 'node24'

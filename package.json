@@ -1,0 +1,37 @@
+{
+  "name": "wispy",
+  "version": "0.1.0",
+  "description": "Drop-in GitHub Action: Nix binary cache on Cloudflare R2",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build:main && npm run build:post && npm run build:uploader",
+    "build:main": "ncc build src/main.ts -o dist/main --source-map --license licenses.txt",
+    "build:post": "ncc build src/post.ts -o dist/post --source-map --license licenses.txt",
+    "build:uploader": "ncc build src/uploader.ts -o dist/uploader --source-map --license licenses.txt",
+    "lint": "eslint src tests",
+    "lint:shell": "shellcheck scripts/*.sh",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify-dist": "npm run build && git diff --exit-code dist/"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.0",
+    "@actions/exec": "^1.1.1",
+    "@aws-sdk/client-s3": "^3.700.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@vercel/ncc": "^0.38.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

@@ -1,0 +1,18 @@
+name: build
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: nicolaschan/wispy@v1
+        with:
+          r2-bucket:            ${{ vars.WISPY_R2_BUCKET }}
+          r2-account-id:        ${{ vars.WISPY_R2_ACCOUNT_ID }}
+          r2-access-key-id:     ${{ secrets.WISPY_R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.WISPY_R2_SECRET_ACCESS_KEY }}
+          signing-private-key:  ${{ secrets.WISPY_SIGNING_PRIVATE_KEY }}
+          signing-public-key:   ${{ vars.WISPY_SIGNING_PUBLIC_KEY }}
+          skip-push: ${{ github.event.pull_request && github.event.pull_request.head.repo.fork }}
+      - run: nix build .#default

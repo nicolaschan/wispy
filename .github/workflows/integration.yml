@@ -1,0 +1,90 @@
+name: integration
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    outputs:
+      out-path: ${{ steps.build.outputs.out-path }}
+    env:
+      WISPY_TEST_SALT: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - run: npm ci
+      - run: npm run build
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Use wispy (this repo)
+        uses: ./
+        with:
+          r2-bucket:            ${{ vars.WISPY_TEST_R2_BUCKET }}
+          r2-account-id:        ${{ vars.WISPY_TEST_R2_ACCOUNT_ID }}
+          r2-access-key-id:     ${{ secrets.WISPY_TEST_R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.WISPY_TEST_R2_SECRET_ACCESS_KEY }}
+          signing-private-key:  ${{ secrets.WISPY_TEST_SIGNING_PRIVATE_KEY }}
+          signing-public-key:   ${{ vars.WISPY_TEST_SIGNING_PUBLIC_KEY }}
+      - id: build
+        name: Build salted test derivation
+        env:
+          WISPY_TEST_SALT: ${{ env.WISPY_TEST_SALT }}
+        run: |
+          OUT=$(nix build --print-out-paths --impure ./tests#default)
+          echo "out-path=$OUT" >> "$GITHUB_OUTPUT"
+          echo "Built: $OUT"
+      - name: Wait for uploader drain
+        run: sleep 5
+        # The action's post step writes the sentinel and waits for the
+        # uploader; the explicit sleep here is a belt-and-suspenders
+        # margin so the assertion in the next step sees R2 fully consistent.
+      - name: Assert path is in R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.WISPY_TEST_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.WISPY_TEST_R2_SECRET_ACCESS_KEY }}
+          WISPY_R2_BUCKET: ${{ vars.WISPY_TEST_R2_BUCKET }}
+          WISPY_R2_ACCOUNT_ID: ${{ vars.WISPY_TEST_R2_ACCOUNT_ID }}
+        run: node tests/scripts/check-pushed.mjs "${{ steps.build.outputs.out-path }}"
+
+  pull:
+    needs: push
+    runs-on: ubuntu-latest
+    env:
+      WISPY_TEST_SALT: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - run: npm ci
+      - run: npm run build
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Use wispy (this repo, skip-push)
+        uses: ./
+        with:
+          r2-bucket:            ${{ vars.WISPY_TEST_R2_BUCKET }}
+          r2-account-id:        ${{ vars.WISPY_TEST_R2_ACCOUNT_ID }}
+          r2-access-key-id:     ${{ secrets.WISPY_TEST_R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.WISPY_TEST_R2_SECRET_ACCESS_KEY }}
+          signing-private-key:  ${{ secrets.WISPY_TEST_SIGNING_PRIVATE_KEY }}
+          signing-public-key:   ${{ vars.WISPY_TEST_SIGNING_PUBLIC_KEY }}
+          skip-push: 'true'
+      - name: Build the same salted derivation; assert it was substituted
+        run: |
+          OUT="${{ needs.push.outputs.out-path }}"
+          echo "Expecting substitution of: $OUT"
+          # If we successfully substitute, the path appears in the store
+          # without any local build. Use --max-jobs 0 to make a local
+          # build IMPOSSIBLE — the command fails if nix can't fetch.
+          nix build --max-jobs 0 --impure ./tests#default
+          # Verify the output path matches and was not rebuilt.
+          ACTUAL=$(nix build --print-out-paths --impure ./tests#default)
+          test "$ACTUAL" = "$OUT" || { echo "store path mismatch"; exit 1; }
+          echo "OK: $OUT substituted from cache"

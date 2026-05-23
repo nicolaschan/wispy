@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseNarinfo, serializeNarinfo, fingerprint, type Narinfo } from '../../../worker/src/narinfo.js';
 
-const fixturePath = (name: string) =>
+const fixturePath = (name: string): string =>
   join(import.meta.dirname, '..', '..', 'fixtures', name);
 
 describe('parseNarinfo', () => {

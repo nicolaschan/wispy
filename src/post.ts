@@ -1,23 +1,18 @@
 import * as core from '@actions/core';
 import { exec } from '@actions/exec';
 import * as fs from 'node:fs';
+import { readStatus } from './contract.js';
 import { removeWispyBlock } from './nixconf.js';
 import {
   DAEMON_DROPIN_PATH,
   NIX_CONF_PATH,
   makeRuntimePaths,
+  writeSystemFileViaSudo,
 } from './paths.js';
 import { SENTINEL } from './queue.js';
 
 const SHUTDOWN_GRACE_MS = 60_000;
 const POLL_INTERVAL_MS = 250;
-
-interface Status {
-  pathsPushed: number;
-  bytesPushed: number;
-  pathsFailed: number;
-  wallTimeMs: number;
-}
 
 function pidIsAlive(pid: number): boolean {
   try {
@@ -37,14 +32,12 @@ async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
   return false;
 }
 
-async function cleanupNixConf(): Promise<void> {
+async function cleanupNixConf(stagingDir: string): Promise<void> {
   if (!fs.existsSync(NIX_CONF_PATH)) return;
   const existing = fs.readFileSync(NIX_CONF_PATH, 'utf8');
   const cleaned = removeWispyBlock(existing);
   if (cleaned === existing) return;
-  fs.writeFileSync('/tmp/wispy-nix.conf.cleaned', cleaned);
-  await exec('sudo', ['cp', '/tmp/wispy-nix.conf.cleaned', NIX_CONF_PATH]);
-  fs.unlinkSync('/tmp/wispy-nix.conf.cleaned');
+  await writeSystemFileViaSudo(cleaned, NIX_CONF_PATH, stagingDir);
 }
 
 async function cleanupDaemonDropin(): Promise<void> {
@@ -105,7 +98,7 @@ async function run(): Promise<void> {
   }
 
   if (fs.existsSync(paths.status)) {
-    const parsed = JSON.parse(fs.readFileSync(paths.status, 'utf8')) as Status;
+    const parsed = readStatus(paths.status);
     core.setOutput('paths-pushed', parsed.pathsPushed);
     core.setOutput('bytes-pushed', parsed.bytesPushed);
     core.setOutput('paths-failed', parsed.pathsFailed);
@@ -117,15 +110,23 @@ async function run(): Promise<void> {
       core.warning(`wispy: ${parsed.pathsFailed} paths failed to upload (see uploader log above)`);
     }
   } else if (pid !== null) {
-    core.warning('wispy: uploader did not write status.json (likely crashed)');
+    // Uploader started but never wrote status.json — likely crashed.
+    // Count un-pushed paths from the queue to give downstream steps a real signal.
+    const queueLines = fs.existsSync(paths.queue)
+      ? fs.readFileSync(paths.queue, 'utf8').split('\n').filter((l) => l.trim() && l.trim() !== SENTINEL).length
+      : 0;
+    core.warning(
+      `wispy: uploader did not write status.json (likely crashed); ` +
+        `at least ${queueLines} paths may have been lost`,
+    );
     core.setOutput('paths-pushed', 0);
     core.setOutput('bytes-pushed', 0);
-    core.setOutput('paths-failed', 0);
+    core.setOutput('paths-failed', queueLines);
   }
 
   dumpUploaderLog(paths.log);
   shredSigningKey(paths.signingKey);
-  await cleanupNixConf();
+  await cleanupNixConf(paths.dir);
   await cleanupDaemonDropin();
 }
 

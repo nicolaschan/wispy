@@ -1,39 +1,11 @@
 import * as fs from 'node:fs';
-import { open, stat, writeFile } from 'node:fs/promises';
+import { open, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { parseUploaderEnv, writeStatus, type Status } from './contract.js';
 import { QueueParser } from './queue.js';
 
 const exec = promisify(execFile);
-
-interface Env {
-  queueFile: string;
-  statusFile: string;
-  destUrl: string;
-  concurrency: number;
-}
-
-interface Status {
-  pathsPushed: number;
-  bytesPushed: number;
-  pathsFailed: number;
-  wallTimeMs: number;
-}
-
-function envOrThrow(key: string): string {
-  const v = process.env[key];
-  if (!v) throw new Error(`Uploader missing env var: ${key}`);
-  return v;
-}
-
-function readEnv(): Env {
-  return {
-    queueFile: envOrThrow('WISPY_QUEUE_FILE'),
-    statusFile: envOrThrow('WISPY_STATUS_FILE'),
-    destUrl: envOrThrow('WISPY_DEST_URL'),
-    concurrency: Number.parseInt(envOrThrow('WISPY_UPLOAD_CONCURRENCY'), 10),
-  };
-}
 
 async function copyPath(destUrl: string, path: string): Promise<number> {
   // `nix copy --to <url> <path>` uploads the path's signed NAR + narinfo.
@@ -88,7 +60,7 @@ class WorkPool {
 }
 
 async function main(): Promise<void> {
-  const env = readEnv();
+  const env = parseUploaderEnv(process.env);
   const started = Date.now();
   const parser = new QueueParser();
   const pool = new WorkPool(env.concurrency);
@@ -138,7 +110,7 @@ async function main(): Promise<void> {
 
   await Promise.all(inflight);
   status.wallTimeMs = Date.now() - started;
-  await writeFile(env.statusFile, JSON.stringify(status, null, 2));
+  writeStatus(env.statusFile, status);
 }
 
 main().catch((err) => {

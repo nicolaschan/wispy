@@ -1,3 +1,5 @@
+import { exec } from '@actions/exec';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 export const NIX_CONF_PATH = '/etc/nix/nix.conf';
@@ -32,4 +34,23 @@ export function makeRuntimePaths(): RuntimePaths {
     log: path.join(dir, 'uploader.log'),
     daemonEnv: path.join(dir, 'daemon-env'),
   };
+}
+
+/**
+ * Write content to a system path that requires root (uses `sudo cp`).
+ * Stages via a unique temp file in our runtime dir to avoid /tmp collisions
+ * with parallel jobs and to keep the cleanup in one place.
+ */
+export async function writeSystemFileViaSudo(
+  content: string,
+  destPath: string,
+  stagingDir: string,
+): Promise<void> {
+  const stage = path.join(stagingDir, `staged-${path.basename(destPath)}-${process.pid}`);
+  fs.writeFileSync(stage, content);
+  try {
+    await exec('sudo', ['cp', stage, destPath]);
+  } finally {
+    if (fs.existsSync(stage)) fs.unlinkSync(stage);
+  }
 }

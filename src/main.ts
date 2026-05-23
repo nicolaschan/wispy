@@ -3,12 +3,14 @@ import { exec } from '@actions/exec';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
+import { serializeUploaderEnv } from './contract.js';
 import { parseInputs, type Inputs, type RawInputs } from './inputs.js';
 import { applyWispyBlock } from './nixconf.js';
 import {
   DAEMON_DROPIN_PATH,
   NIX_CONF_PATH,
   makeRuntimePaths,
+  writeSystemFileViaSudo,
   type RuntimePaths,
 } from './paths.js';
 import { buildSubstituterUrl, smokeTestBucket } from './r2.js';
@@ -59,10 +61,8 @@ async function installDaemonEnv(paths: RuntimePaths, inputs: Inputs): Promise<vo
   fs.writeFileSync(paths.daemonEnv, envContent, { mode: 0o600 });
 
   const dropin = `[Service]\nEnvironmentFile=${paths.daemonEnv}\n`;
-  fs.writeFileSync('/tmp/wispy-dropin.conf', dropin);
   await exec('sudo', ['mkdir', '-p', path.dirname(DAEMON_DROPIN_PATH)]);
-  await exec('sudo', ['cp', '/tmp/wispy-dropin.conf', DAEMON_DROPIN_PATH]);
-  fs.unlinkSync('/tmp/wispy-dropin.conf');
+  await writeSystemFileViaSudo(dropin, DAEMON_DROPIN_PATH, paths.dir);
   await exec('sudo', ['systemctl', 'daemon-reload']);
 }
 
@@ -81,12 +81,10 @@ function ensureQueueFile(queuePath: string): void {
   fs.chmodSync(queuePath, 0o666);
 }
 
-async function updateNixConf(blockBody: string): Promise<void> {
+async function updateNixConf(blockBody: string, paths: RuntimePaths): Promise<void> {
   const existing = fs.existsSync(NIX_CONF_PATH) ? fs.readFileSync(NIX_CONF_PATH, 'utf8') : '';
   const next = applyWispyBlock(existing, blockBody);
-  fs.writeFileSync('/tmp/wispy-nix.conf.new', next);
-  await exec('sudo', ['cp', '/tmp/wispy-nix.conf.new', NIX_CONF_PATH]);
-  fs.unlinkSync('/tmp/wispy-nix.conf.new');
+  await writeSystemFileViaSudo(next, NIX_CONF_PATH, paths.dir);
 }
 
 async function restartDaemon(): Promise<void> {
@@ -101,12 +99,14 @@ function spawnUploader(paths: RuntimePaths, inputs: Inputs, destUrl: string): nu
     stdio: ['ignore', logFd, logFd],
     env: {
       ...process.env,
-      WISPY_QUEUE_FILE: paths.queue,
-      WISPY_STATUS_FILE: paths.status,
-      WISPY_DEST_URL: destUrl,
-      WISPY_UPLOAD_CONCURRENCY: String(inputs.uploadConcurrency),
-      AWS_ACCESS_KEY_ID: inputs.r2AccessKeyId,
-      AWS_SECRET_ACCESS_KEY: inputs.r2SecretAccessKey,
+      ...serializeUploaderEnv({
+        queueFile: paths.queue,
+        statusFile: paths.status,
+        destUrl,
+        concurrency: inputs.uploadConcurrency,
+        awsAccessKeyId: inputs.r2AccessKeyId,
+        awsSecretAccessKey: inputs.r2SecretAccessKey,
+      }),
     },
   });
   child.unref();
@@ -141,7 +141,7 @@ async function run(): Promise<void> {
     secretAccessKey: inputs.r2SecretAccessKey,
   });
 
-  await updateNixConf(buildNixConfBlock(inputs, paths, destUrl));
+  await updateNixConf(buildNixConfBlock(inputs, paths, destUrl), paths);
   await installDaemonEnv(paths, inputs);
   await restartDaemon();
 

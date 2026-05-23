@@ -50,6 +50,6 @@ outputs:
     description: 'Count of paths that failed to upload'
 
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/main/index.js'
   post: 'dist/post/index.js'

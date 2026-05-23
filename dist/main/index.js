@@ -53667,6 +53667,8 @@ var external_node_fs_ = __nccwpck_require__(3024);
 var external_node_path_ = __nccwpck_require__(6760);
 // EXTERNAL MODULE: external "node:child_process"
 var external_node_child_process_ = __nccwpck_require__(1421);
+// EXTERNAL MODULE: external "node:url"
+var external_node_url_ = __nccwpck_require__(3136);
 ;// CONCATENATED MODULE: ./src/contract.ts
 
 function writeStatus(path, s) {
@@ -53881,6 +53883,7 @@ async function smokeTestBucket(creds) {
 
 
 
+
 function readActionInputs() {
     const keys = [
         'r2-bucket',
@@ -53899,12 +53902,10 @@ function readActionInputs() {
         raw[k] = core.getInput(k);
     return raw;
 }
-function actionPath() {
-    const p = process.env.GITHUB_ACTION_PATH;
-    if (!p)
-        throw new Error('GITHUB_ACTION_PATH is not set');
-    return p;
-}
+// The bundled entry ships at <action-root>/dist/main/index.js, so the action
+// checkout root is two directories up. GITHUB_ACTION_PATH would be cleaner
+// but the runner only sets it for composite actions, not node20 actions.
+const ACTION_ROOT = external_node_path_.resolve(external_node_path_.dirname((0,external_node_url_.fileURLToPath)(import.meta.url)), '..', '..');
 function buildNixConfBlock(inputs, paths, destUrl) {
     const lines = [
         `extra-substituters = ${destUrl} ${inputs.extraSubstituters.join(' ')}`.trim(),
@@ -53949,7 +53950,7 @@ async function restartDaemon() {
     await (0,exec.exec)('sudo', ['systemctl', 'restart', 'nix-daemon']);
 }
 function spawnUploader(paths, inputs, destUrl) {
-    const uploaderJs = external_node_path_.join(actionPath(), 'dist', 'uploader', 'index.js');
+    const uploaderJs = external_node_path_.join(ACTION_ROOT, 'dist', 'uploader', 'index.js');
     const logFd = external_node_fs_.openSync(paths.log, 'a');
     const child = (0,external_node_child_process_.spawn)('node', [uploaderJs], {
         detached: true,
@@ -53983,7 +53984,7 @@ async function run() {
     core.setSecret(inputs.signingPrivateKey);
     if (!inputs.skipPush) {
         writeSigningKey(inputs.signingPrivateKey, paths.signingKey);
-        materializeHook(actionPath(), paths);
+        materializeHook(ACTION_ROOT, paths);
         ensureQueueFile(paths.queue);
     }
     const destUrl = buildSubstituterUrl(inputs.r2Bucket, inputs.r2AccountId);

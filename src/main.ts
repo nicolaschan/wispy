@@ -3,6 +3,7 @@ import { exec } from '@actions/exec';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { serializeUploaderEnv } from './contract.js';
 import { parseInputs, type Inputs, type RawInputs } from './inputs.js';
 import { applyWispyBlock } from './nixconf.js';
@@ -33,11 +34,10 @@ function readActionInputs(): RawInputs {
   return raw;
 }
 
-function actionPath(): string {
-  const p = process.env.GITHUB_ACTION_PATH;
-  if (!p) throw new Error('GITHUB_ACTION_PATH is not set');
-  return p;
-}
+// The bundled entry ships at <action-root>/dist/main/index.js, so the action
+// checkout root is two directories up. GITHUB_ACTION_PATH would be cleaner
+// but the runner only sets it for composite actions, not node20 actions.
+const ACTION_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 function buildNixConfBlock(inputs: Inputs, paths: RuntimePaths, destUrl: string): string {
   const lines = [
@@ -92,7 +92,7 @@ async function restartDaemon(): Promise<void> {
 }
 
 function spawnUploader(paths: RuntimePaths, inputs: Inputs, destUrl: string): number {
-  const uploaderJs = path.join(actionPath(), 'dist', 'uploader', 'index.js');
+  const uploaderJs = path.join(ACTION_ROOT, 'dist', 'uploader', 'index.js');
   const logFd = fs.openSync(paths.log, 'a');
   const child = spawn('node', [uploaderJs], {
     detached: true,
@@ -129,7 +129,7 @@ async function run(): Promise<void> {
 
   if (!inputs.skipPush) {
     writeSigningKey(inputs.signingPrivateKey, paths.signingKey);
-    materializeHook(actionPath(), paths);
+    materializeHook(ACTION_ROOT, paths);
     ensureQueueFile(paths.queue);
   }
 

@@ -83,9 +83,10 @@ writeFileSync(tomlPath, toml);
 console.log(`patched ${tomlPath}: CACHE_NAME=${args.cache}, bucket_name=${args.bucket}`);
 
 // 5. Create the R2 bucket (idempotent: ignore "already exists").
-// --remote targets real R2 instead of the local .wrangler/state sandbox.
+// `r2 bucket create` always targets real R2; there is no local equivalent
+// (unlike `r2 object put`, which defaults to local and needs --remote).
 console.log(`creating R2 bucket ${args.bucket}...`);
-const createR = spawnSync('wrangler', ['r2', 'bucket', 'create', args.bucket, '--remote'], { stdio: ['ignore', 'inherit', 'pipe'] });
+const createR = spawnSync('wrangler', ['r2', 'bucket', 'create', args.bucket], { stdio: ['ignore', 'inherit', 'pipe'] });
 if (createR.status !== 0) {
   const err = createR.stderr?.toString() ?? '';
   if (!/already exists/i.test(err)) {

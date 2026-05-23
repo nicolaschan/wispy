@@ -1,0 +1,55 @@
+name: 'wispy'
+description: 'Cache Nix builds on Cloudflare R2'
+author: 'nicolaschan'
+branding:
+  icon: 'archive'
+  color: 'orange'
+
+inputs:
+  r2-bucket:
+    description: 'R2 bucket name'
+    required: true
+  r2-account-id:
+    description: 'Cloudflare account ID (used to build endpoint URL)'
+    required: true
+  r2-access-key-id:
+    description: "R2 API token's access key ID"
+    required: true
+  r2-secret-access-key:
+    description: "R2 API token's secret access key"
+    required: true
+  signing-private-key:
+    description: 'Full contents of the ed25519 binary cache private key file'
+    required: true
+  signing-public-key:
+    description: 'Public key string (e.g. wispy-foo-1:abc...=)'
+    required: true
+  upload-concurrency:
+    description: 'Maximum parallel `nix copy` invocations'
+    required: false
+    default: '8'
+  extra-substituters:
+    description: 'Space-separated substituter URLs merged into nix.conf'
+    required: false
+    default: 'https://cache.nixos.org/'
+  extra-trusted-public-keys:
+    description: 'Space-separated trusted public keys merged into nix.conf'
+    required: false
+    default: 'cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY='
+  skip-push:
+    description: 'If true, configure pull only (no signing key, no post-build-hook)'
+    required: false
+    default: 'false'
+
+outputs:
+  paths-pushed:
+    description: 'Count of unique store paths uploaded to R2'
+  bytes-pushed:
+    description: 'Sum of compressed NAR bytes uploaded'
+  paths-failed:
+    description: 'Count of paths that failed to upload'
+
+runs:
+  using: 'node20'
+  main: 'dist/main/index.js'
+  post: 'dist/post/index.js'

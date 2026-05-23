@@ -15,7 +15,7 @@
           version = "0.1.0";
           src = ./.;
           npmDepsHash = "sha256-5ajSbNvwAIOJGcUuHrBMKCRtvZb3IxceOFOGwtzdksc=";
-          nodejs = pkgs.nodejs_20;
+          nodejs = pkgs.nodejs_24;
 
           # `npm run build` (via npmBuildHook) emits dist/{main,post,uploader}/index.js.
           # Ship those bundles plus action.yml and scripts/ so $out is a complete,
@@ -41,7 +41,7 @@
       devShells = forAll (pkgs: {
         default = pkgs.mkShellNoCC {
           packages = [
-            pkgs.nodejs_20
+            pkgs.nodejs_24
             pkgs.shellcheck
             pkgs.git
           ];

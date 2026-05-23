@@ -34,4 +34,18 @@ describe('signFingerprint', () => {
     const b = await signFingerprint('input', key);
     expect(a).toBe(b);
   });
+
+  it('signature does not verify under a different public key', async () => {
+    const fingerprint = '1;/nix/store/abc-name;sha256:nh;42;';
+    const sig = await signFingerprint(fingerprint, key);
+    const [, base64] = sig.split(':');
+    const sigBytes = Buffer.from(base64!, 'base64');
+
+    // Flip one bit of the public key so it no longer matches the signing key.
+    const wrongPub = Buffer.from(key.publicKeyBase64, 'base64');
+    wrongPub[0] ^= 0x01;
+    const wrongKey = ed25519PubFromRaw(wrongPub);
+    const ok = verify(null, Buffer.from(fingerprint, 'utf8'), wrongKey, sigBytes);
+    expect(ok).toBe(false);
+  });
 });

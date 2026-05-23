@@ -26,8 +26,8 @@ jobs:
       - name: Use wispy (this repo)
         uses: ./
         with:
-          server-url: ${{ vars.WISPY_TEST_SERVER_URL }}
-          token: ${{ secrets.WISPY_TEST_PUSH_TOKEN }}
+          server-url: ${{ vars.WISPY_SERVER_URL }}
+          token: ${{ secrets.WISPY_TOKEN }}
       - id: build
         name: Build salted test derivation
         env:
@@ -55,8 +55,8 @@ jobs:
       - name: Use wispy (this repo)
         uses: ./
         with:
-          server-url: ${{ vars.WISPY_TEST_SERVER_URL }}
-          token: ${{ secrets.WISPY_TEST_PULL_TOKEN }}
+          server-url: ${{ vars.WISPY_SERVER_URL }}
+          token: ${{ secrets.WISPY_TOKEN }}
       - name: Build the same salted derivation; assert it was substituted
         run: |
           OUT="${{ needs.push.outputs.out-path }}"

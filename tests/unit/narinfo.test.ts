@@ -31,6 +31,11 @@ describe('parseNarinfo', () => {
   it('throws on missing required fields', () => {
     expect(() => parseNarinfo('StorePath: /nix/store/x\n')).toThrow(/missing required/i);
   });
+
+  it('throws on non-numeric size fields', () => {
+    const text = 'StorePath: /nix/store/abc-name\nURL: nar/x\nCompression: zstd\nFileHash: sha256:a\nFileSize: not-a-number\nNarHash: sha256:b\nNarSize: 2\nReferences: \n';
+    expect(() => parseNarinfo(text)).toThrow(/FileSize must be a non-negative integer/);
+  });
 });
 
 describe('serializeNarinfo', () => {

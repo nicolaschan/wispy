@@ -13,6 +13,11 @@ export interface Narinfo {
 
 const REQUIRED = ['StorePath', 'URL', 'Compression', 'FileHash', 'FileSize', 'NarHash', 'NarSize'] as const;
 
+function parseSize(field: string, raw: string): number {
+  if (!/^\d+$/.test(raw)) throw new Error(`narinfo ${field} must be a non-negative integer (got "${raw}")`);
+  return Number.parseInt(raw, 10);
+}
+
 export function parseNarinfo(text: string): Narinfo {
   const fields: Record<string, string> = {};
   for (const line of text.split('\n')) {
@@ -33,9 +38,9 @@ export function parseNarinfo(text: string): Narinfo {
     url: fields['URL']!,
     compression: fields['Compression']!,
     fileHash: fields['FileHash']!,
-    fileSize: Number.parseInt(fields['FileSize']!, 10),
+    fileSize: parseSize('FileSize', fields['FileSize']!),
     narHash: fields['NarHash']!,
-    narSize: Number.parseInt(fields['NarSize']!, 10),
+    narSize: parseSize('NarSize', fields['NarSize']!),
     references,
     deriver: fields['Deriver'],
     sig: fields['Sig'],

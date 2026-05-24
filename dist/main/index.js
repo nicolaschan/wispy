@@ -27427,6 +27427,8 @@ var __webpack_exports__ = {};
 
 // EXTERNAL MODULE: ./node_modules/@actions/core/lib/core.js
 var core = __nccwpck_require__(7484);
+// EXTERNAL MODULE: ./node_modules/@actions/exec/lib/exec.js
+var exec = __nccwpck_require__(5236);
 ;// CONCATENATED MODULE: external "node:fs"
 const external_node_fs_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
 ;// CONCATENATED MODULE: external "node:path"
@@ -27485,6 +27487,7 @@ function parseInputs(raw) {
 
 
 
+
 // dist/main/index.js → action root is two dirs up.
 const ACTION_ROOT = external_node_path_namespaceObject.resolve(external_node_path_namespaceObject.dirname((0,external_node_url_namespaceObject.fileURLToPath)(import.meta.url)), '..', '..');
 function readActionInputs() {
@@ -27519,13 +27522,25 @@ function writeNetrc(dir, inputs) {
     external_node_fs_namespaceObject.writeFileSync(p, body, { mode: 0o600 });
     return p;
 }
-function materializeHook(dir, inputs, nixConfPath) {
+async function resolveNixBin() {
+    // The daemon spawns the hook with a minimal PATH that may not include
+    // nix. Resolve the absolute path now (where PATH does include it) and
+    // bake it into the hook script.
+    const { stdout } = await (0,exec.getExecOutput)('command', ['-v', 'nix'], { silent: true });
+    const nixBin = stdout.trim();
+    if (!nixBin)
+        throw new Error('could not locate `nix` on PATH');
+    return nixBin;
+}
+function materializeHook(dir, inputs, nixConfPath, nixBin) {
     const template = external_node_fs_namespaceObject.readFileSync(external_node_path_namespaceObject.join(ACTION_ROOT, 'scripts', 'hook.sh'), 'utf8');
     const rendered = template
+        .replace(/__WISPY_NIX_BIN__/g, nixBin)
         .replace(/__WISPY_NIX_CONF__/g, nixConfPath)
         .replace(/__WISPY_SERVER_URL__/g, inputs.serverUrl);
     const p = external_node_path_namespaceObject.join(dir, 'hook.sh');
     external_node_fs_namespaceObject.writeFileSync(p, rendered, { mode: 0o755 });
+    external_node_fs_namespaceObject.chmodSync(p, 0o755);
     return p;
 }
 function registerUserNixConf(confPath) {
@@ -27541,12 +27556,13 @@ async function run() {
     core.setSecret(inputs.token);
     const dir = runtimeDir();
     const info = await fetchCacheInfo(inputs.serverUrl);
+    const nixBin = await resolveNixBin();
     const netrc = writeNetrc(dir, inputs);
     const hookPath = external_node_path_namespaceObject.join(dir, 'hook.sh');
     const conf = writeUserNixConf(dir, inputs, info.publicKey, netrc, hookPath);
-    materializeHook(dir, inputs, conf);
+    materializeHook(dir, inputs, conf, nixBin);
     registerUserNixConf(conf);
-    core.info(`wispy: configured substituter ${inputs.serverUrl} (StoreDir=${info.storeDir})`);
+    core.info(`wispy: configured substituter ${inputs.serverUrl} (StoreDir=${info.storeDir}, nix=${nixBin})`);
 }
 run().catch((err) => {
     const msg = err instanceof Error ? err.message : String(err);

@@ -1,4 +1,5 @@
 import * as core from '@actions/core';
+import { getExecOutput } from '@actions/exec';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,13 +50,25 @@ function writeNetrc(dir: string, inputs: Inputs): string {
   return p;
 }
 
-function materializeHook(dir: string, inputs: Inputs, nixConfPath: string): string {
+async function resolveNixBin(): Promise<string> {
+  // The daemon spawns the hook with a minimal PATH that may not include
+  // nix. Resolve the absolute path now (where PATH does include it) and
+  // bake it into the hook script.
+  const { stdout } = await getExecOutput('command', ['-v', 'nix'], { silent: true });
+  const nixBin = stdout.trim();
+  if (!nixBin) throw new Error('could not locate `nix` on PATH');
+  return nixBin;
+}
+
+function materializeHook(dir: string, inputs: Inputs, nixConfPath: string, nixBin: string): string {
   const template = fs.readFileSync(path.join(ACTION_ROOT, 'scripts', 'hook.sh'), 'utf8');
   const rendered = template
+    .replace(/__WISPY_NIX_BIN__/g, nixBin)
     .replace(/__WISPY_NIX_CONF__/g, nixConfPath)
     .replace(/__WISPY_SERVER_URL__/g, inputs.serverUrl);
   const p = path.join(dir, 'hook.sh');
   fs.writeFileSync(p, rendered, { mode: 0o755 });
+  fs.chmodSync(p, 0o755);
   return p;
 }
 
@@ -75,14 +88,15 @@ async function run(): Promise<void> {
 
   const dir = runtimeDir();
   const info = await fetchCacheInfo(inputs.serverUrl);
+  const nixBin = await resolveNixBin();
 
   const netrc = writeNetrc(dir, inputs);
   const hookPath = path.join(dir, 'hook.sh');
   const conf = writeUserNixConf(dir, inputs, info.publicKey, netrc, hookPath);
-  materializeHook(dir, inputs, conf);
+  materializeHook(dir, inputs, conf, nixBin);
   registerUserNixConf(conf);
 
-  core.info(`wispy: configured substituter ${inputs.serverUrl} (StoreDir=${info.storeDir})`);
+  core.info(`wispy: configured substituter ${inputs.serverUrl} (StoreDir=${info.storeDir}, nix=${nixBin})`);
 }
 
 run().catch((err) => {

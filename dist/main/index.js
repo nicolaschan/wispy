@@ -27525,8 +27525,9 @@ function writeNetrc(dir, inputs) {
 async function resolveNixBin() {
     // The daemon spawns the hook with a minimal PATH that may not include
     // nix. Resolve the absolute path now (where PATH does include it) and
-    // bake it into the hook script.
-    const { stdout } = await (0,exec.getExecOutput)('command', ['-v', 'nix'], { silent: true });
+    // bake it into the hook script. Use `which` (a real binary), not the
+    // bash builtin `command -v` — @actions/exec needs an executable.
+    const { stdout } = await (0,exec.getExecOutput)('which', ['nix'], { silent: true });
     const nixBin = stdout.trim();
     if (!nixBin)
         throw new Error('could not locate `nix` on PATH');

@@ -83,6 +83,8 @@ writeFileSync(tomlPath, toml);
 console.log(`patched ${tomlPath}: CACHE_NAME=${args.cache}, bucket_name=${args.bucket}`);
 
 // 5. Create the R2 bucket (idempotent: ignore "already exists").
+// `r2 bucket create` always targets real R2; there is no local equivalent
+// (unlike `r2 object put`, which defaults to local and needs --remote).
 console.log(`creating R2 bucket ${args.bucket}...`);
 const createR = spawnSync('wrangler', ['r2', 'bucket', 'create', args.bucket], { stdio: ['ignore', 'inherit', 'pipe'] });
 if (createR.status !== 0) {
@@ -95,7 +97,9 @@ if (createR.status !== 0) {
 }
 
 // 6. Upload nix-cache-info. Includes Wispy-PublicKey so the action can
-// discover it without an extra input.
+// discover it without an extra input. --remote is required; without it
+// wrangler puts the object in the local sandbox and the deployed worker
+// returns 500 because real R2 is empty.
 const cacheInfo =
   `StoreDir: /nix/store\n` +
   `WantMassQuery: 1\n` +
@@ -103,7 +107,7 @@ const cacheInfo =
   `Wispy-PublicKey: ${pubNix}\n`;
 const tmpInfoPath = join(wispyDir, 'nix-cache-info');
 writeFileSync(tmpInfoPath, cacheInfo);
-run('wrangler', ['r2', 'object', 'put', `${args.bucket}/nix-cache-info`, '--file', tmpInfoPath, '--content-type', 'text/x-nix-cache-info']);
+run('wrangler', ['r2', 'object', 'put', `${args.bucket}/nix-cache-info`, '--file', tmpInfoPath, '--content-type', 'text/x-nix-cache-info', '--remote']);
 
 // 7. Upload secrets.
 console.log('uploading SIGNING_PRIVATE_KEY...');

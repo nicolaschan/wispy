@@ -27,15 +27,30 @@ function parseSigningKey(secret: string): SigningKey {
   return { name, privateKeyBase64, publicKeyBase64 };
 }
 
+function extractToken(authHeader: string | null): string | null {
+  if (!authHeader) return null;
+  if (authHeader.startsWith('Bearer ')) {
+    return authHeader.slice('Bearer '.length).trim();
+  }
+  // Nix's HTTP cache uses libcurl + netrc, which sends Basic auth. The
+  // netrc on the action side has the JWT as the password (any username).
+  if (authHeader.startsWith('Basic ')) {
+    const decoded = atob(authHeader.slice('Basic '.length).trim());
+    const colon = decoded.indexOf(':');
+    if (colon < 0) return null;
+    return decoded.slice(colon + 1);
+  }
+  return null;
+}
+
 async function requireScope(req: Request, env: Env, want: 'push' | 'pull'): Promise<Response | null> {
-  const auth = req.headers.get('authorization');
-  if (!auth || !auth.startsWith('Bearer ')) {
+  const token = extractToken(req.headers.get('authorization'));
+  if (!token) {
     return new Response(JSON.stringify({ error: 'unauthorized' }), {
       status: 401,
       headers: { 'content-type': 'application/json' },
     });
   }
-  const token = auth.slice('Bearer '.length).trim();
   const secret = Uint8Array.from(atob(env.JWT_ROOT_SECRET), (c) => c.charCodeAt(0));
   try {
     const payload = await verifyToken(token, secret);

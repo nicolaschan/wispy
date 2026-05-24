@@ -43,8 +43,10 @@ function writeUserNixConf(
 }
 
 function writeNetrc(dir: string, inputs: Inputs): string {
+  // Libcurl's netrc parser requires both `login` and `password`. We use a
+  // placeholder login since the Worker only validates the password (the JWT).
   const host = new URL(inputs.serverUrl).host;
-  const body = `machine ${host} password ${inputs.token}\n`;
+  const body = `machine ${host} login token password ${inputs.token}\n`;
   const p = path.join(dir, 'netrc');
   fs.writeFileSync(p, body, { mode: 0o600 });
   return p;

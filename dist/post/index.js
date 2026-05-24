@@ -27447,6 +27447,16 @@ function shred(filePath) {
     }
     external_node_fs_namespaceObject.unlinkSync(filePath);
 }
+function dumpHookLog(logPath) {
+    if (!external_node_fs_namespaceObject.existsSync(logPath))
+        return;
+    const content = external_node_fs_namespaceObject.readFileSync(logPath, 'utf8');
+    if (!content.trim())
+        return;
+    core.startGroup('wispy hook log');
+    core.info(content);
+    core.endGroup();
+}
 async function run() {
     const t = process.env.RUNNER_TEMP;
     if (!t)
@@ -27454,6 +27464,9 @@ async function run() {
     const dir = external_node_path_namespaceObject.join(t, 'wispy');
     if (!external_node_fs_namespaceObject.existsSync(dir))
         return;
+    // Dump the hook log first so failures during the job are visible
+    // even when the daemon swallowed stderr.
+    dumpHookLog(external_node_path_namespaceObject.join(dir, 'hook.log'));
     // The netrc holds the bearer token. Zero it before deletion.
     shred(external_node_path_namespaceObject.join(dir, 'netrc'));
     // RUNNER_TEMP is cleaned by the runner; nothing else to do.

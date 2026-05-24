@@ -14,5 +14,11 @@
 # propagate the action's environment to spawned hooks.
 set -u
 export NIX_USER_CONF_FILES="__WISPY_NIX_CONF__"
-# shellcheck disable=SC2086  # OUT_PATHS is space-separated and must word-split
-exec "__WISPY_NIX_BIN__" copy --to "__WISPY_SERVER_URL__" $OUT_PATHS
+# Capture stdout+stderr to a log the post step can dump; nix-daemon
+# swallows hook output otherwise. Append so multiple builds in one job
+# accumulate.
+{
+  echo "=== $(date -Iseconds) pushing: $OUT_PATHS"
+  # shellcheck disable=SC2086  # OUT_PATHS is space-separated and must word-split
+  "__WISPY_NIX_BIN__" copy --to "__WISPY_SERVER_URL__" $OUT_PATHS
+} >> "__WISPY_LOG__" 2>&1

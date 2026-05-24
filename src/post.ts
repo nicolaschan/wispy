@@ -13,11 +13,24 @@ function shred(filePath: string): void {
   fs.unlinkSync(filePath);
 }
 
+function dumpHookLog(logPath: string): void {
+  if (!fs.existsSync(logPath)) return;
+  const content = fs.readFileSync(logPath, 'utf8');
+  if (!content.trim()) return;
+  core.startGroup('wispy hook log');
+  core.info(content);
+  core.endGroup();
+}
+
 async function run(): Promise<void> {
   const t = process.env.RUNNER_TEMP;
   if (!t) return;
   const dir = path.join(t, 'wispy');
   if (!fs.existsSync(dir)) return;
+
+  // Dump the hook log first so failures during the job are visible
+  // even when the daemon swallowed stderr.
+  dumpHookLog(path.join(dir, 'hook.log'));
 
   // The netrc holds the bearer token. Zero it before deletion.
   shred(path.join(dir, 'netrc'));

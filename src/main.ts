@@ -61,15 +61,20 @@ async function resolveNixBin(): Promise<string> {
   return nixBin;
 }
 
-function materializeHook(dir: string, inputs: Inputs, nixConfPath: string, nixBin: string): string {
+function materializeHook(dir: string, inputs: Inputs, nixConfPath: string, nixBin: string, logPath: string): string {
   const template = fs.readFileSync(path.join(ACTION_ROOT, 'scripts', 'hook.sh'), 'utf8');
   const rendered = template
     .replace(/__WISPY_NIX_BIN__/g, nixBin)
     .replace(/__WISPY_NIX_CONF__/g, nixConfPath)
-    .replace(/__WISPY_SERVER_URL__/g, inputs.serverUrl);
+    .replace(/__WISPY_SERVER_URL__/g, inputs.serverUrl)
+    .replace(/__WISPY_LOG__/g, logPath);
   const p = path.join(dir, 'hook.sh');
   fs.writeFileSync(p, rendered, { mode: 0o755 });
   fs.chmodSync(p, 0o755);
+  // The hook runs as the daemon (root) and writes to this log; make it
+  // world-writable so successive invocations can append.
+  fs.writeFileSync(logPath, '', { mode: 0o666 });
+  fs.chmodSync(logPath, 0o666);
   return p;
 }
 
@@ -93,8 +98,9 @@ async function run(): Promise<void> {
 
   const netrc = writeNetrc(dir, inputs);
   const hookPath = path.join(dir, 'hook.sh');
+  const logPath = path.join(dir, 'hook.log');
   const conf = writeUserNixConf(dir, inputs, info.publicKey, netrc, hookPath);
-  materializeHook(dir, inputs, conf, nixBin);
+  materializeHook(dir, inputs, conf, nixBin, logPath);
   registerUserNixConf(conf);
 
   core.info(`wispy: configured substituter ${inputs.serverUrl} (StoreDir=${info.storeDir}, nix=${nixBin})`);
